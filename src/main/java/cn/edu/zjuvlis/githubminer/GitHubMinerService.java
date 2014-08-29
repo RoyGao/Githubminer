@@ -5,11 +5,9 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -20,38 +18,48 @@ import org.eclipse.egit.github.core.service.WatcherService;
 
 public class GitHubMinerService {
 	private LinkedList<UserSimple> seedDict = new LinkedList<UserSimple>();
-	private LinkedList<RepoSimple> repoDict = new LinkedList<RepoSimple>();
+	private HashMap<String, Long> repoDict = new HashMap<String, Long>();
 	private HashMap<UserSimple, LinkedList<RepoSimple>> correDict = new HashMap<UserSimple, LinkedList<RepoSimple>>(); 
-	private File seed = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
-	private File desti = new File("/roy/mlDataSets/corre_dict.dat");
+	private File seedUser = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
+    private File seedRepo = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
+	private File destiCorr = new File("/roy/mlDataSets/corre_dict.dat");
+    private File destiRepo = new File("/roy/mlDataSets/repo_dict.dat");
 	private GitHubClient client;
 	public GitHubMinerService(){
 		client = new GitHubClient();
 		client.setCredentials("roygao", "gao000628");
-		importSeed();
+		importSeed(seedUser);
+//        importSeed(seedRepo);
 	}
 	public LinkedList<UserSimple> getSeed(){
 		return seedDict;
 	}
-	public void importSeed(){
+	public void importSeed(File seed){
+        FileReader rd = null;
+        BufferedReader br = null;
 		try {
 			System.out.println("Start loading Seeds！！！ ");
 			long counter = 0;
 			String str = null;
-			FileReader rd = new FileReader(seed);
-			BufferedReader br = new BufferedReader(rd);
+			rd = new FileReader(seed);
+			br = new BufferedReader(rd);
 			while((str = br.readLine()) != null ){
 				counter ++;
 				seedDict.add(new UserSimple(str, counter));
 			}
-			rd.close();
-			br.close();
 			System.out.println("Loading Finished ! ! ! ");
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		}
-	}
+		} finally {
+            try {
+                rd.close();
+                br.close();
+            }catch (IOException e){
+                e.printStackTrace();
+            }
+        }
+    }
 	public void correGenerator(String option){
 		for(UserSimple usr : seedDict){
 			System.out.println("==============================");
@@ -71,14 +79,17 @@ public class GitHubMinerService {
 	public LinkedList<RepoSimple> getForkers(UserSimple user){
 		RepositoryService rs = new RepositoryService(this.client);
 		LinkedList<RepoSimple> listRepo = new LinkedList<RepoSimple>();
-		System.out.println("Getting forked repos of" + (user.getName()));
+		System.out.println("Getting forked repos of " + (user.getName()));
 		try{
-			for(Iterator<Repository> i = rs.getRepositories().iterator(); i.hasNext();){
-				Repository rep = i.next();
-				if(rep.isFork() == true)
-					listRepo.add(new RepoSimple(rep.getName(), rep.getId()));
+			for(Repository rep : rs.getRepositories(user.getName())){
+				if(rep.isFork() == true) {
+                    String name = rep.getName();
+                    if(repoDict.containsKey(name) == false)
+                        repoDict.put(name, (long)repoDict.size()+1);
+                    listRepo.add(new RepoSimple(name, repoDict.get(name)));
+                }
 			}
-			System.out.println("finish forked getting repos of" + (user.getName()));
+			System.out.println("finish forked getting repos of " + (user.getName()));
 		}catch(IOException e){
 			e.printStackTrace();
 		}
@@ -87,13 +98,15 @@ public class GitHubMinerService {
 	public LinkedList<RepoSimple> getStarers(UserSimple user){
 		WatcherService ws = new WatcherService(this.client);
 		LinkedList<RepoSimple> listRepo = new LinkedList<RepoSimple>();
-		System.out.println("Getting starred repos of" + (user.getName()));
+		System.out.println("Getting starred repos of " + (user.getName()));
 		try{
-			for(Iterator<Repository> i = ws.getWatched(user.getName()).iterator(); i.hasNext();){
-				Repository rep = i.next();
-				listRepo.add(new RepoSimple(rep.getName(), rep.getId()));
+			for(Repository rep : ws.getWatched(user.getName())){
+                String name = rep.getName();
+                if(repoDict.containsKey(name) == false)
+                    repoDict.put(name, (long)repoDict.size()+1);
+				listRepo.add(new RepoSimple(name, repoDict.get(name)));
 			}
-			System.out.println("finish starred getting repos of" + (user.getName()));
+			System.out.println("finish starred getting repos of " + (user.getName()));
 		}catch (IOException e){
 			e.printStackTrace();
 		}
@@ -103,7 +116,7 @@ public class GitHubMinerService {
 		BufferedWriter bw = null;
 		FileWriter fw = null;
 		try {
-			fw = new FileWriter(desti);
+			fw = new FileWriter(destiCorr);
 			bw = new BufferedWriter(fw);
 			Iterator<Entry<UserSimple, LinkedList<RepoSimple>>> iter = correDict.entrySet().iterator();
 			StringBuffer sb = new StringBuffer();
@@ -132,11 +145,37 @@ public class GitHubMinerService {
 			}
 		}
 	}
+    public void flushRepoDict(){
+        BufferedWriter bw = null;
+        FileWriter fw = null;
+        try {
+            fw = new FileWriter(destiRepo);
+            bw = new BufferedWriter(fw);
+            Iterator<Entry<String, Long>> iter = repoDict.entrySet().iterator();
+            System.out.println("Start flushing Correlations ！！！ ");
+            while(iter.hasNext()){
+                Map.Entry<String, Long> entry = iter.next();
+                bw.write(entry.getKey() + "\r\n");
+            }
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } finally {
+            try {
+                fw.close();
+                bw.close();
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        }
+    }
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
  		GitHubMinerService miner = new GitHubMinerService();
-		miner.correGenerator("fork");
+		miner.correGenerator("star");
 		miner.flushCorrelation();
+        miner.flushRepoDict();
 	}
 }
 
