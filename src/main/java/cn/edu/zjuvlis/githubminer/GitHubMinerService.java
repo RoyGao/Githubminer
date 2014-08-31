@@ -16,25 +16,30 @@ import org.eclipse.egit.github.core.client.GitHubClient;
 import org.eclipse.egit.github.core.service.RepositoryService;
 import org.eclipse.egit.github.core.service.WatcherService;
 
+
+
 public class GitHubMinerService {
 	private LinkedList<UserSimple> seedDict = new LinkedList<UserSimple>();
 	private HashMap<String, Long> repoDict = new HashMap<String, Long>();
 	private HashMap<UserSimple, LinkedList<RepoSimple>> correDict = new HashMap<UserSimple, LinkedList<RepoSimple>>(); 
 	private File seedUser = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
-    private File seedRepo = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
+    private File seedRepo = new File("/roy/test/python_test/machineLearning/datasets/repo_dict_90000.dat");
 	private File destiCorr = new File("/roy/mlDataSets/corre_dict.dat");
     private File destiRepo = new File("/roy/mlDataSets/repo_dict.dat");
 	private GitHubClient client;
+
+    private static final int CORRLIMIT = 2;
+
 	public GitHubMinerService(){
 		client = new GitHubClient();
-		client.setCredentials("roygao", "gao000628");
-		importSeed(seedUser);
-//        importSeed(seedRepo);
+		client.setCredentials("roygao", "zjutest2014");
+		importSeed(seedUser, "User");
+        importSeed(seedRepo, "Repo");
 	}
 	public LinkedList<UserSimple> getSeed(){
 		return seedDict;
 	}
-	public void importSeed(File seed){
+	public void importSeed(File seed, String option){
         FileReader rd = null;
         BufferedReader br = null;
 		try {
@@ -45,7 +50,18 @@ public class GitHubMinerService {
 			br = new BufferedReader(rd);
 			while((str = br.readLine()) != null ){
 				counter ++;
-				seedDict.add(new UserSimple(str, counter));
+                switch(option){
+                    case "User":
+                        seedDict.add(new UserSimple(str, counter));
+                        break;
+                    case "Repo":
+                        repoDict.put(str, counter);
+                        break;
+                    default:
+                        System.out.println("No this option supported");
+                        break;
+                }
+
 			}
 			System.out.println("Loading Finished ! ! ! ");
 		} catch (IOException e) {
@@ -82,7 +98,7 @@ public class GitHubMinerService {
 		System.out.println("Getting forked repos of " + (user.getName()));
 		try{
 			for(Repository rep : rs.getRepositories(user.getName())){
-				if(rep.isFork() == true) {
+				if(rep.isFork() == true && rep.getWatchers() > CORRLIMIT) {
                     String name = rep.getName();
                     if(repoDict.containsKey(name) == false)
                         repoDict.put(name, (long)repoDict.size()+1);
@@ -101,10 +117,12 @@ public class GitHubMinerService {
 		System.out.println("Getting starred repos of " + (user.getName()));
 		try{
 			for(Repository rep : ws.getWatched(user.getName())){
-                String name = rep.getName();
-                if(repoDict.containsKey(name) == false)
-                    repoDict.put(name, (long)repoDict.size()+1);
-				listRepo.add(new RepoSimple(name, repoDict.get(name)));
+                if(rep.getWatchers() > CORRLIMIT) {
+                    String name = rep.getName();
+                    if (repoDict.containsKey(name) == false)
+                        repoDict.put(name, (long)repoDict.size() + 1);
+                    listRepo.add(new RepoSimple(name, repoDict.get(name)));
+                }
 			}
 			System.out.println("finish starred getting repos of " + (user.getName()));
 		}catch (IOException e){
@@ -137,6 +155,7 @@ public class GitHubMinerService {
 			e.printStackTrace();
 		} finally {
 			try {
+                bw.flush();
 				fw.close();
 				bw.close();
 			} catch (IOException e) {
@@ -152,16 +171,17 @@ public class GitHubMinerService {
             fw = new FileWriter(destiRepo);
             bw = new BufferedWriter(fw);
             Iterator<Entry<String, Long>> iter = repoDict.entrySet().iterator();
-            System.out.println("Start flushing Correlations ！！！ ");
+            System.out.println("Start flushing Repos ！！！ ");
             while(iter.hasNext()){
                 Map.Entry<String, Long> entry = iter.next();
-                bw.write(entry.getKey() + "\r\n");
+                bw.write(entry.getKey() + " " + entry.getValue() + "\r\n");
             }
         } catch (IOException e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
         } finally {
             try {
+                bw.flush();
                 fw.close();
                 bw.close();
             } catch (IOException e) {
@@ -173,7 +193,7 @@ public class GitHubMinerService {
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
  		GitHubMinerService miner = new GitHubMinerService();
-		miner.correGenerator("star");
+		miner.correGenerator("fork");
 		miner.flushCorrelation();
         miner.flushRepoDict();
 	}
