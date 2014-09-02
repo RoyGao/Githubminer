@@ -5,14 +5,13 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
 
 import org.eclipse.egit.github.core.Repository;
 import org.eclipse.egit.github.core.client.GitHubClient;
+import org.eclipse.egit.github.core.client.RequestException;
+import org.eclipse.egit.github.core.service.CollaboratorService;
 import org.eclipse.egit.github.core.service.RepositoryService;
 import org.eclipse.egit.github.core.service.WatcherService;
 
@@ -21,11 +20,13 @@ import org.eclipse.egit.github.core.service.WatcherService;
 public class GitHubMinerService {
 	private LinkedList<UserSimple> seedDict = new LinkedList<UserSimple>();
 	private HashMap<String, Long> repoDict = new HashMap<String, Long>();
-	private HashMap<UserSimple, LinkedList<RepoSimple>> correDict = new HashMap<UserSimple, LinkedList<RepoSimple>>(); 
+	private HashMap<UserSimple, LinkedList<RepoSimple>> correDict = new HashMap<UserSimple, LinkedList<RepoSimple>>();
+    private ArrayList<GithubAccount> accountDict = new ArrayList<GithubAccount>();
 	private File seedUser = new File("/roy/test/python_test/machineLearning/datasets/users_dict.txt");
-    private File seedRepo = new File("/roy/test/python_test/machineLearning/datasets/repo_dict_90000.dat");
+    private File seedRepo = new File("/roy/test/python_test/machineLearning/datasets/repo_dict_2014_9_2_star.dat");
 	private File destiCorr = new File("/roy/mlDataSets/corre_dict.dat");
     private File destiRepo = new File("/roy/mlDataSets/repo_dict.dat");
+    private int index = 0; // used to flag the Account of Github
 	private GitHubClient client;
 
     private static final int CORRLIMIT = 2;
@@ -33,13 +34,15 @@ public class GitHubMinerService {
 	public GitHubMinerService(){
 		client = new GitHubClient();
 		client.setCredentials("roygao", "zjutest2014");
-		importSeed(seedUser, "User");
-        importSeed(seedRepo, "Repo");
+		importSeed(seedUser);
+        importRepo(seedRepo);
+        //add account info of Github
+        accountDict.add(new GithubAccount("roygao", "zjutest2014"));
 	}
 	public LinkedList<UserSimple> getSeed(){
 		return seedDict;
 	}
-	public void importSeed(File seed, String option){
+	public void importSeed(File seed){
         FileReader rd = null;
         BufferedReader br = null;
 		try {
@@ -50,18 +53,7 @@ public class GitHubMinerService {
 			br = new BufferedReader(rd);
 			while((str = br.readLine()) != null ){
 				counter ++;
-                switch(option){
-                    case "User":
-                        seedDict.add(new UserSimple(str, counter));
-                        break;
-                    case "Repo":
-                        repoDict.put(str, counter);
-                        break;
-                    default:
-                        System.out.println("No this option supported");
-                        break;
-                }
-
+                seedDict.add(new UserSimple(str, counter));
 			}
 			System.out.println("Loading Finished ! ! ! ");
 		} catch (IOException e) {
@@ -76,6 +68,42 @@ public class GitHubMinerService {
             }
         }
     }
+    private class GithubAccount{
+        private String account;
+        private String passwd;
+        public GithubAccount(String a, String p){
+            account = a;
+            passwd = p;
+        }
+        public String getAccount(){ return account; }
+        public String getPasswd(){ return passwd; }
+    }
+    public void importRepo(File seed){
+        FileReader rd = null;
+        BufferedReader br = null;
+        try {
+            System.out.println("Start loading Repos！！！ ");
+            String str = null;
+            rd = new FileReader(seed);
+            br = new BufferedReader(rd);
+            while((str = br.readLine()) != null ){
+                String[] entry = str.split("\\s+");
+                repoDict.put(entry[0], Long.valueOf(entry[1]));
+            }
+            System.out.println("Loading Finished ! ! ! ");
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        } finally {
+            try {
+                rd.close();
+                br.close();
+            }catch (IOException e){
+                e.printStackTrace();
+            }
+        }
+    }
+
 	public void correGenerator(String option){
 		for(UserSimple usr : seedDict){
 			System.out.println("==============================");
@@ -86,6 +114,9 @@ public class GitHubMinerService {
 			case "fork":
 				correDict.put(usr, getForkers(usr));
 				break;
+            case "collaborator":
+                correDict.put(usr, getCollaborators(usr));
+                break;
 			default:
 				System.out.println("No this option supported");
 				break;
@@ -114,7 +145,7 @@ public class GitHubMinerService {
 	public LinkedList<RepoSimple> getStarers(UserSimple user){
 		WatcherService ws = new WatcherService(this.client);
 		LinkedList<RepoSimple> listRepo = new LinkedList<RepoSimple>();
-		System.out.println("Getting starred repos of " + (user.getName()));
+        System.out.println("Getting starred repos of " + (user.getName()));
 		try{
 			for(Repository rep : ws.getWatched(user.getName())){
                 if(rep.getWatchers() > CORRLIMIT) {
@@ -130,6 +161,35 @@ public class GitHubMinerService {
 		}
 		return listRepo;
 	}
+
+    public LinkedList<RepoSimple> getCollaborators(UserSimple user){
+        RepositoryService rs = new RepositoryService(this.client);
+        CollaboratorService cs = new CollaboratorService(this.client);
+        LinkedList<RepoSimple> listRepo = new LinkedList<RepoSimple>();
+        System.out.println("Getting collaborative repos of " + (user.getName()));
+        try{
+            for(Repository rep : rs.getRepositories(user.getName())){
+                if(cs.isCollaborator(rep, user.getName()) && rep.getWatchers() > CORRLIMIT) {
+                    String name = rep.getName();
+                    if(repoDict.containsKey(name) == false)
+                        repoDict.put(name, (long)repoDict.size()+1);
+                    listRepo.add(new RepoSimple(name, repoDict.get(name)));
+                }
+            }
+            System.out.println("finish  getting collaborative repos of " + (user.getName()));
+        }catch(IOException e){
+            e.printStackTrace();
+            if(index == accountDict.size()-1)
+                index = 0;
+            else
+                index ++;
+            this.client.setCredentials(accountDict.get(index).getAccount(),accountDict.get(index).getPasswd());
+            rs = new RepositoryService(this.client);
+            cs = new CollaboratorService(this.client);
+        }
+        return listRepo;
+    }
+
 	public void flushCorrelation(){
 		BufferedWriter bw = null;
 		FileWriter fw = null;
